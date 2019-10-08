@@ -14,32 +14,36 @@
 package org.apache.hadoop.hive.dynamodb.type;
 
 import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-
 import org.apache.hadoop.dynamodb.type.DynamoDBStringSetType;
 import org.apache.hadoop.hive.dynamodb.util.DynamoDBDataParser;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 import java.util.List;
 
 public class HiveDynamoDBStringSetType extends DynamoDBStringSetType implements HiveDynamoDBType {
 
-  private final DynamoDBDataParser parser = new DynamoDBDataParser();
-
   @Override
-  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector) {
-    List<String> values = parser.getListAttribute(data, objectInspector, getDynamoDBType());
-    if ((values != null) && (!values.isEmpty())) {
-      return new AttributeValue().withSS(values);
-    } else {
-      return null;
-    }
+  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector, boolean nullSerialization) {
+    List<String> values = DynamoDBDataParser.getSetAttribute(data, objectInspector, getDynamoDBType());
+    return (values == null || values.isEmpty()) ?
+        DynamoDBDataParser.getNullAttribute(nullSerialization) :
+        new AttributeValue().withSS(values);
   }
 
   @Override
-  public Object getHiveData(AttributeValue data, String hiveType) {
-    if (data == null) {
-      return null;
-    }
+  public TypeInfo getSupportedHiveType() {
+    return TypeInfoFactory.getListTypeInfo(TypeInfoFactory.stringTypeInfo);
+  }
+
+  @Override
+  public boolean supportsHiveType(TypeInfo typeInfo) {
+    return typeInfo.equals(getSupportedHiveType());
+  }
+
+  @Override
+  public Object getHiveData(AttributeValue data, ObjectInspector objectInspector) {
     return data.getSS();
   }
 

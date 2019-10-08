@@ -13,20 +13,19 @@
 
 package org.apache.hadoop.hive.dynamodb.type;
 
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
-
 import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-
 import org.apache.hadoop.dynamodb.DynamoDBUtil;
 import org.apache.hadoop.dynamodb.key.DynamoDBKey;
 import org.apache.hadoop.dynamodb.type.DynamoDBItemType;
-import org.apache.hadoop.hive.dynamodb.DerivedHiveTypeConstants;
+import org.apache.hadoop.dynamodb.type.DynamoDBTypeConstants;
 import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector.Category;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.StringObjectInspector;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
 import java.lang.reflect.Type;
 import java.util.HashMap;
@@ -38,13 +37,23 @@ public class HiveDynamoDBItemType implements DynamoDBItemType, HiveDynamoDBType 
   private static final Type TYPE = new TypeToken<AttributeValue>() {}.getType();
 
   @Override
-  public Object getHiveData(AttributeValue data, String hiveType) {
+  public Object getHiveData(AttributeValue data, ObjectInspector objectInspector) {
     throw new UnsupportedOperationException("DynamoDBItemType does not support this operation.");
   }
 
   @Override
-  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector) {
+  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector, boolean nullSerialization) {
     throw new UnsupportedOperationException("DynamoDBItemType does not support this operation.");
+  }
+
+  @Override
+  public TypeInfo getSupportedHiveType() {
+    return TypeInfoFactory.getMapTypeInfo(TypeInfoFactory.stringTypeInfo, TypeInfoFactory.stringTypeInfo);
+  }
+
+  @Override
+  public boolean supportsHiveType(TypeInfo typeInfo) {
+    return typeInfo.equals(getSupportedHiveType());
   }
 
   @Override
@@ -54,7 +63,7 @@ public class HiveDynamoDBItemType implements DynamoDBItemType, HiveDynamoDBType 
 
   @Override
   public String getDynamoDBType() {
-    throw new UnsupportedOperationException("DynamoDBItemType does not support this operation.");
+    return DynamoDBTypeConstants.ITEM;
   }
 
   @Override
@@ -107,14 +116,13 @@ public class HiveDynamoDBItemType implements DynamoDBItemType, HiveDynamoDBType 
   public Map<String, AttributeValue> parseDynamoDBData(Object data, ObjectInspector
       fieldObjectInspector) throws SerDeException {
 
-    if (fieldObjectInspector.getCategory() != Category.MAP || !DerivedHiveTypeConstants
-        .ITEM_MAP_TYPE_NAME.equals(fieldObjectInspector.getTypeName())) {
+    if (!HiveDynamoDBTypeFactory.isHiveDynamoDBItemMapType(fieldObjectInspector)) {
       throw new SerDeException(getClass().toString() + " Expecting a MapObjectInspector of type "
           + "map<string,string> for a column which maps DynamoDB item. But we got: "
-          + fieldObjectInspector.getTypeName() + " Object inspector: " + fieldObjectInspector);
+          + fieldObjectInspector.getTypeName());
     }
 
-    Map<String, AttributeValue> item = new HashMap<String, AttributeValue>();
+    Map<String, AttributeValue> item = new HashMap<>();
 
     /* map is of type <String, String> */
     MapObjectInspector mapOI = (MapObjectInspector) fieldObjectInspector;
@@ -138,8 +146,7 @@ public class HiveDynamoDBItemType implements DynamoDBItemType, HiveDynamoDBType 
 
       /* Get the string key, value pair */
       String dynamoDBAttributeName = mapKeyObjectInspector.getPrimitiveJavaObject(entry.getKey());
-      String dynamoDBAttributeValue = mapValueObjectInspector.getPrimitiveJavaObject(entry
-          .getValue());
+      String dynamoDBAttributeValue = mapValueObjectInspector.getPrimitiveJavaObject(entry.getValue());
 
       /* Deserialize the AttributeValue string */
       AttributeValue deserializedAttributeValue = deserializeAttributeValue(dynamoDBAttributeValue);
@@ -149,12 +156,12 @@ public class HiveDynamoDBItemType implements DynamoDBItemType, HiveDynamoDBType 
     return item;
   }
 
-  private String serializeAttributeValue(AttributeValue value) {
+  private static String serializeAttributeValue(AttributeValue value) {
     Gson gson = DynamoDBUtil.getGson();
     return gson.toJson(value, TYPE);
   }
 
-  public AttributeValue deserializeAttributeValue(String value) {
+  public static AttributeValue deserializeAttributeValue(String value) {
     Gson gson = DynamoDBUtil.getGson();
 
     Object fromJson = gson.fromJson(value, TYPE);

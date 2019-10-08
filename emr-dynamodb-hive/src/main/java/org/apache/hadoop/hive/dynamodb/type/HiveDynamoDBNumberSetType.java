@@ -14,33 +14,39 @@
 package org.apache.hadoop.hive.dynamodb.type;
 
 import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-
 import org.apache.hadoop.dynamodb.type.DynamoDBNumberSetType;
 import org.apache.hadoop.hive.dynamodb.util.DynamoDBDataParser;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 import java.util.List;
 
 public class HiveDynamoDBNumberSetType extends DynamoDBNumberSetType implements HiveDynamoDBType {
 
-  private final DynamoDBDataParser parser = new DynamoDBDataParser();
-
   @Override
-  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector) {
-    List<String> values = parser.getListAttribute(data, objectInspector, getDynamoDBType());
-    if ((values != null) && (!values.isEmpty())) {
-      return new AttributeValue().withNS(values);
-    } else {
-      return null;
-    }
+  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector, boolean nullSerialization) {
+    List<String> values = DynamoDBDataParser.getSetAttribute(data, objectInspector, getDynamoDBType());
+    return (values == null || values.isEmpty()) ?
+        DynamoDBDataParser.getNullAttribute(nullSerialization) :
+        new AttributeValue().withNS(values);
   }
 
   @Override
-  public Object getHiveData(AttributeValue data, String hiveType) {
-    if (data == null) {
-      return null;
-    }
-    return parser.getNumberObjectList(data.getNS(), hiveType);
+  public TypeInfo getSupportedHiveType() {
+    throw new UnsupportedOperationException(getClass().toString() + " does not support this operation.");
+  }
+
+  @Override
+  public boolean supportsHiveType(TypeInfo typeInfo) {
+    return typeInfo.equals(TypeInfoFactory.getListTypeInfo(TypeInfoFactory.doubleTypeInfo)) ||
+            typeInfo.equals(TypeInfoFactory.getListTypeInfo(TypeInfoFactory.longTypeInfo));
+
+  }
+
+  @Override
+  public Object getHiveData(AttributeValue data, ObjectInspector objectInspector) {
+    return data.getNS() == null ? null : DynamoDBDataParser.getNumberObjectList(data.getNS(), objectInspector);
   }
 
 }

@@ -14,6 +14,7 @@
 package org.apache.hadoop.dynamodb;
 
 import com.amazonaws.regions.Regions;
+import com.amazonaws.services.dynamodbv2.model.BillingMode;
 
 /**
  * Contains constants used for the Hadoop to DynamoDB connection. Note that many of these string
@@ -31,6 +32,9 @@ public interface DynamoDBConstants {
 
   // Table constants
   String DYNAMODB_COLUMN_MAPPING = "dynamodb.column.mapping";
+  String DYNAMODB_TYPE_MAPPING = "dynamodb.type.mapping";
+  String DYNAMODB_NULL_SERIALIZATION = "dynamodb.null.serialization";
+
   // JobConf constants
   String DYNAMODB_FILTER_PUSHDOWN = "dynamodb.filter.pushdown";
 
@@ -57,10 +61,15 @@ public interface DynamoDBConstants {
   String TABLE_SIZE_BYTES = "dynamodb.table.size-bytes";
   String MAX_MAP_TASKS = "dynamodb.max.map.tasks";
   String DEFAULT_THROUGHPUT_PERCENTAGE = "0.5";
+  String BILLING_MODE_PROVISIONED = BillingMode.PROVISIONED.toString();
 
-  String MAX_ITEM_SIZE = "dynamodb.max.item.size";
+  String DYNAMODB_MAX_ITEM_SIZE = "dynamodb.max.item.size";
+  String MAX_ITEM_SIZE = DYNAMODB_MAX_ITEM_SIZE;
   String MAX_BATCH_SIZE = "dynamodb.max.batch.size";
   String MAX_ITEMS_PER_BATCH = "dynamodb.max.batch.items";
+
+  String DELETION_MODE = "dynamodb.deletion.mode";
+  boolean DEFAULT_DELETION_MODE = false;
 
   // http://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Limits.html
   long DEFAULT_MAX_ITEM_SIZE = 400 * 1024;
@@ -86,4 +95,5 @@ public interface DynamoDBConstants {
   String DEFAULT_AWS_REGION = Regions.US_EAST_1.getName();
 
   int DEFAULT_AVERAGE_ITEM_SIZE_IN_BYTES = 100;
+  Long DEFAULT_CAPACITY_FOR_ON_DEMAND = 40000L;
 }

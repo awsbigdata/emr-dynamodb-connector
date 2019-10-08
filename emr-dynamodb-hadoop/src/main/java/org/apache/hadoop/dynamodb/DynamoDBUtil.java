@@ -145,8 +145,8 @@ public final class DynamoDBUtil {
     try {
       int itemSize = 0;
       for (Entry<String, AttributeValue> entry : item.entrySet()) {
-        itemSize += entry.getKey().getBytes(CHARACTER_ENCODING).length;
-        itemSize += getAttributeSizeBytes(entry.getValue());
+        itemSize += entry.getKey() != null ? entry.getKey().getBytes(CHARACTER_ENCODING).length : 0;
+        itemSize += entry.getValue() != null ? getAttributeSizeBytes(entry.getValue()) : 0;
       }
       return itemSize;
     } catch (UnsupportedEncodingException e) {
@@ -185,6 +185,14 @@ public final class DynamoDBUtil {
     } else if (att.getBS() != null) {
       for (ByteBuffer byteBuffer : att.getBS()) {
         byteSize += byteBuffer.array().length;
+      }
+    } else if (att.getM() != null) {
+      for (Entry<String, AttributeValue> entry : att.getM().entrySet()) {
+    	byteSize += getAttributeSizeBytes(entry.getValue()) + entry.getKey().getBytes(CHARACTER_ENCODING).length;
+      }
+    } else if (att.getL() != null) {
+      for (AttributeValue entry : att.getL()) {
+        byteSize += getAttributeSizeBytes(entry);
       }
     }
     return byteSize;

@@ -14,33 +14,34 @@
 package org.apache.hadoop.hive.dynamodb.type;
 
 import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-
 import org.apache.hadoop.dynamodb.type.DynamoDBBinaryType;
 import org.apache.hadoop.hive.dynamodb.util.DynamoDBDataParser;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 import java.nio.ByteBuffer;
 
 public class HiveDynamoDBBinaryType extends DynamoDBBinaryType implements HiveDynamoDBType {
 
-  private final DynamoDBDataParser parser = new DynamoDBDataParser();
-
   @Override
-  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector) {
-    ByteBuffer value = parser.getByteBuffer(data, objectInspector);
-    return new AttributeValue().withB(value);
+  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector, boolean nullSerialization) {
+    ByteBuffer value = DynamoDBDataParser.getByteBuffer(data, objectInspector);
+    return value == null ? DynamoDBDataParser.getNullAttribute(nullSerialization) : new AttributeValue().withB(value);
   }
 
   @Override
-  public Object getHiveData(AttributeValue data, String hiveType) {
-    if (data == null) {
-      return null;
-    }
+  public TypeInfo getSupportedHiveType() {
+    return TypeInfoFactory.binaryTypeInfo;
+  }
 
-    if (data.getB() == null) {
-      return null;
-    }
+  @Override
+  public boolean supportsHiveType(TypeInfo typeInfo) {
+    return typeInfo.equals(getSupportedHiveType());
+  }
 
-    return data.getB().array();
+  @Override
+  public Object getHiveData(AttributeValue data, ObjectInspector objectInspector) {
+    return data.getB() == null ? null : data.getB().array();
   }
 }

@@ -14,33 +14,32 @@
 package org.apache.hadoop.hive.dynamodb;
 
 import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-
 import org.apache.hadoop.dynamodb.DynamoDBItemWritable;
 import org.apache.hadoop.hive.dynamodb.type.HiveDynamoDBItemType;
 import org.apache.hadoop.hive.dynamodb.type.HiveDynamoDBType;
 import org.apache.hadoop.hive.dynamodb.type.HiveDynamoDBTypeFactory;
+import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class DynamoDBObjectInspector extends StructObjectInspector {
 
   private final List<String> columnNames;
-  private final Map<String, String> hiveDynamoDBColumnMappings;
   private List<StructField> structFields;
   private Map<String, DynamoDBField> columnNameStructFieldMap;
 
-  public DynamoDBObjectInspector(List<String> columnNames, List<TypeInfo> columnTypes,
-      Map<String, String> columnMappings) {
+  DynamoDBObjectInspector(List<String> columnNames, List<TypeInfo> columnTypes, Map<String, String> columnMappings,
+                          Map<String, HiveDynamoDBType> typeMappings) {
     this.columnNames = columnNames;
-    this.hiveDynamoDBColumnMappings = columnMappings;
 
     if (columnNames == null) {
       throw new RuntimeException("Null columns names passed");
@@ -50,16 +49,16 @@ public class DynamoDBObjectInspector extends StructObjectInspector {
       throw new RuntimeException("Null columns types passed");
     }
 
-    structFields = new ArrayList<>();
-    columnNameStructFieldMap = new HashMap<>();
+    structFields = Lists.newArrayList();
+    columnNameStructFieldMap = Maps.newHashMap();
 
     // Constructing struct field list for each column
     for (int i = 0; i < columnNames.size(); i++) {
-      DynamoDBField field = new DynamoDBField(i, columnNames.get(i).toLowerCase(), TypeInfoUtils
-          .getStandardJavaObjectInspectorFromTypeInfo(columnTypes.get(i)), columnTypes.get(i)
-          .getTypeName());
+      String columnName = columnNames.get(i);
+      DynamoDBField field = new DynamoDBField(i, columnName, columnMappings.get(columnName), columnTypes.get(i),
+          typeMappings.get(columnName));
       structFields.add(field);
-      columnNameStructFieldMap.put(columnNames.get(i), field);
+      columnNameStructFieldMap.put(columnName, field);
     }
   }
 
@@ -77,32 +76,26 @@ public class DynamoDBObjectInspector extends StructObjectInspector {
   private Object getColumnData(StructField fieldRef, DynamoDBItemWritable rowData) {
     try {
       /* Get the hive data type for this column. */
-      String hiveType = ((DynamoDBField) fieldRef).getType();
+      DynamoDBField ddFieldRef = (DynamoDBField) fieldRef;
+      ObjectInspector fieldOI = ddFieldRef.getFieldObjectInspector();
 
       /* Get the Hive to DynamoDB type mapper for this column. */
-      HiveDynamoDBType ddType = HiveDynamoDBTypeFactory.getTypeObjectFromHiveType(hiveType);
+      HiveDynamoDBType ddType = ddFieldRef.getDynamoDBType();
 
-      if (ddType == null) {
-        throw new RuntimeException("Unsupported hive type " + hiveType);
-      }
-
-      /* See if column is of hive map<string,string> type. */
-      if (ddType instanceof HiveDynamoDBItemType) {
+      /* See if column is of item type. */
+      if (HiveDynamoDBTypeFactory.isHiveDynamoDBItemMapType(ddType)) {
         /*
          * User has mapped a DynamoDB item to a single hive column of
          * type map<string,string>.
          */
         HiveDynamoDBItemType ddItemType = (HiveDynamoDBItemType) ddType;
-
         return ddItemType.buildHiveData(rowData.getItem());
-
       } else {
-        /* User has mapped individual attributes in DyanamoDB to hive. */
-        if (rowData.getItem()
-            .containsKey(hiveDynamoDBColumnMappings.get(fieldRef.getFieldName()))) {
-          AttributeValue fieldValue = rowData.getItem()
-              .get(hiveDynamoDBColumnMappings.get(fieldRef.getFieldName()));
-          return ddType.getHiveData(fieldValue, hiveType);
+        /* User has mapped individual attributes in DynamoDB to hive. */
+        String attributeName = ddFieldRef.getAttributeName();
+        if (rowData.getItem().containsKey(attributeName)) {
+          AttributeValue fieldValue = rowData.getItem().get(attributeName);
+          return fieldValue == null ? null : ddType.getHiveData(fieldValue, fieldOI);
         } else {
           return null;
         }
@@ -135,23 +128,24 @@ public class DynamoDBObjectInspector extends StructObjectInspector {
 
   @Override
   public String getTypeName() {
-    return "struct";
+    return serdeConstants.STRUCT_TYPE_NAME;
   }
 
   private static class DynamoDBField implements StructField {
 
     private final int fieldID;
     private final String fieldName;
+    private final String attributeName;
     private final ObjectInspector objectInspector;
-    private final String type;
+    private final HiveDynamoDBType ddType;
 
-    public DynamoDBField(int fieldID, String fieldName, ObjectInspector objectInspector, String
-        fieldType) {
+    DynamoDBField(int fieldID, String fieldName, String attributeName, TypeInfo typeInfo, HiveDynamoDBType ddType) {
       super();
       this.fieldID = fieldID;
       this.fieldName = fieldName;
-      this.objectInspector = objectInspector;
-      this.type = fieldType;
+      this.attributeName = attributeName;
+      this.objectInspector = TypeInfoUtils.getStandardJavaObjectInspectorFromTypeInfo(typeInfo);
+      this.ddType = ddType;
     }
 
     @Override
@@ -164,10 +158,6 @@ public class DynamoDBObjectInspector extends StructObjectInspector {
       return objectInspector;
     }
 
-    public String getType() {
-      return type;
-    }
-
     @Override
     public String getFieldComment() {
       return null;
@@ -176,6 +166,14 @@ public class DynamoDBObjectInspector extends StructObjectInspector {
     @Override
     public int getFieldID() {
       return fieldID;
+    }
+
+    String getAttributeName() {
+      return attributeName;
+    }
+
+    HiveDynamoDBType getDynamoDBType() {
+      return ddType;
     }
   }
 

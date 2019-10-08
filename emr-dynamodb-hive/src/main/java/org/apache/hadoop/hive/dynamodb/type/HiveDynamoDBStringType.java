@@ -14,30 +14,31 @@
 package org.apache.hadoop.hive.dynamodb.type;
 
 import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-
 import org.apache.hadoop.dynamodb.type.DynamoDBStringType;
 import org.apache.hadoop.hive.dynamodb.util.DynamoDBDataParser;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 public class HiveDynamoDBStringType extends DynamoDBStringType implements HiveDynamoDBType {
-
-  private final DynamoDBDataParser parser = new DynamoDBDataParser();
-
   @Override
-  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector) {
-    String value = parser.getString(data, objectInspector);
-    if (value != null) {
-      return new AttributeValue(value);
-    } else {
-      return null;
-    }
+  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector, boolean nullSerialization) {
+    String value = DynamoDBDataParser.getString(data, objectInspector);
+    return value == null ? DynamoDBDataParser.getNullAttribute(nullSerialization) : new AttributeValue(value);
   }
 
   @Override
-  public Object getHiveData(AttributeValue data, String hiveType) {
-    if (data == null) {
-      return null;
-    }
+  public TypeInfo getSupportedHiveType() {
+    return TypeInfoFactory.stringTypeInfo;
+  }
+
+  @Override
+  public boolean supportsHiveType(TypeInfo typeInfo) {
+    return typeInfo.equals(getSupportedHiveType());
+  }
+
+  @Override
+  public Object getHiveData(AttributeValue data, ObjectInspector objectInspector) {
     return data.getS();
   }
 

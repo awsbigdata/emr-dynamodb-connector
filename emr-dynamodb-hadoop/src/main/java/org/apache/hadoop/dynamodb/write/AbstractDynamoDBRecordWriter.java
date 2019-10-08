@@ -65,9 +65,10 @@ public abstract class AbstractDynamoDBRecordWriter<K, V> implements RecordWriter
   private int batchSize = 0;
   private long intervalBeginTime = 0;
   private long nextPrintCount = PRINT_COUNT_INCREMENT;
-  private long totolItemsWritten = 0;
+  private long totalItemsWritten = 0;
   private double totalIOPSConsumed = 0;
   private long writesPerSecond = 0;
+  private boolean deletionMode;
 
   public AbstractDynamoDBRecordWriter(JobConf jobConf, Progressable progressable) {
     this.progressable = progressable;
@@ -77,6 +78,9 @@ public abstract class AbstractDynamoDBRecordWriter<K, V> implements RecordWriter
     if (tableName == null) {
       throw new ResourceNotFoundException("No output table name was specified.");
     }
+
+
+    deletionMode = jobConf.getBoolean(DynamoDBConstants.DELETION_MODE, DynamoDBConstants.DEFAULT_DELETION_MODE);
 
     IopsCalculator iopsCalculator = new WriteIopsCalculator(createJobClient(jobConf), client,
         tableName);
@@ -95,7 +99,7 @@ public abstract class AbstractDynamoDBRecordWriter<K, V> implements RecordWriter
   @Override
   public void write(K key, V value) throws IOException {
     if (value == null) {
-      throw new RuntimeException("Null record encoutered. At least the key columns must be "
+      throw new RuntimeException("Null record encountered. At least the key columns must be "
           + "specified.");
     }
 
@@ -106,15 +110,17 @@ public abstract class AbstractDynamoDBRecordWriter<K, V> implements RecordWriter
 
     DynamoDBItemWritable item = convertValueToDynamoDBItem(key, value);
     BatchWriteItemResult result = client.putBatch(tableName, item.getItem(),
-        permissibleWritesPerSecond - writesPerSecond, reporter);
+        permissibleWritesPerSecond - writesPerSecond, reporter, deletionMode);
 
     batchSize++;
-    totolItemsWritten++;
+    totalItemsWritten++;
 
     if (result != null) {
-      for (ConsumedCapacity consumedCapacity : result.getConsumedCapacity()) {
-        double consumedUnits = consumedCapacity.getCapacityUnits();
-        totalIOPSConsumed += consumedUnits;
+      if (result.getConsumedCapacity() != null) {
+        for (ConsumedCapacity consumedCapacity : result.getConsumedCapacity()) {
+          double consumedUnits = consumedCapacity.getCapacityUnits();
+          totalIOPSConsumed += consumedUnits;
+        }
       }
 
       int unprocessedItems = 0;
@@ -129,7 +135,7 @@ public abstract class AbstractDynamoDBRecordWriter<K, V> implements RecordWriter
   @Override
   public void close(Reporter reporter) throws IOException {
     client.close();
-    log.info(totolItemsWritten + " total items written");
+    log.info(totalItemsWritten + " total items written");
   }
 
   /**
@@ -147,8 +153,8 @@ public abstract class AbstractDynamoDBRecordWriter<K, V> implements RecordWriter
       }
       permissibleWritesPerSecond = iopsController.getTargetItemsPerSecond();
 
-      if (totolItemsWritten > nextPrintCount) {
-        log.info("Total items written: " + totolItemsWritten);
+      if (totalItemsWritten > nextPrintCount) {
+        log.info("Total items written: " + totalItemsWritten);
         log.info("New writes per second: " + permissibleWritesPerSecond);
         nextPrintCount += PRINT_COUNT_INCREMENT;
       }

@@ -13,11 +13,8 @@
 
 package org.apache.hadoop.hive.dynamodb;
 
-import com.google.common.base.Strings;
-
 import com.amazonaws.services.dynamodbv2.model.AttributeDefinition;
 import com.amazonaws.services.dynamodbv2.model.TableDescription;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -43,20 +40,22 @@ import org.apache.hadoop.hive.ql.plan.ExprNodeDesc;
 import org.apache.hadoop.hive.ql.plan.TableDesc;
 import org.apache.hadoop.hive.ql.security.authorization.DefaultHiveAuthorizationProvider;
 import org.apache.hadoop.hive.ql.security.authorization.HiveAuthorizationProvider;
+import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.Deserializer;
-import org.apache.hadoop.hive.serde2.SerDe;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
+import com.google.common.base.Strings;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-public class DynamoDBStorageHandler implements HiveMetaHook, HiveStoragePredicateHandler,
-    HiveStorageHandler {
+public class DynamoDBStorageHandler
+    implements HiveMetaHook, HiveStoragePredicateHandler, HiveStorageHandler {
 
   private static final Log log = LogFactory.getLog(DynamoDBStorageHandler.class);
 
@@ -148,7 +147,7 @@ public class DynamoDBStorageHandler implements HiveMetaHook, HiveStoragePredicat
       jobProperties.put(DynamoDBConstants.TABLE_NAME, tableName);
 
       Map<String, String> hiveToDynamoDBSchemaMapping = HiveDynamoDBUtil
-          .getHiveToDynamoDBSchemaMapping(tableDesc.getProperties().getProperty(DynamoDBConstants
+          .getHiveToDynamoDBMapping(tableDesc.getProperties().getProperty(DynamoDBConstants
               .DYNAMODB_COLUMN_MAPPING));
 
       // Column map can be null if only full backup is being used
@@ -156,6 +155,20 @@ public class DynamoDBStorageHandler implements HiveMetaHook, HiveStoragePredicat
         jobProperties.put(DynamoDBConstants.DYNAMODB_COLUMN_MAPPING, HiveDynamoDBUtil
             .toJsonString(hiveToDynamoDBSchemaMapping));
       }
+
+      Map<String, String> hiveToDynamoDBTypeMapping = HiveDynamoDBUtil
+          .getHiveToDynamoDBMapping(tableDesc.getProperties().getProperty(DynamoDBConstants
+              .DYNAMODB_TYPE_MAPPING));
+
+      if (hiveToDynamoDBSchemaMapping != null) {
+        jobProperties.put(DynamoDBConstants.DYNAMODB_TYPE_MAPPING, HiveDynamoDBUtil
+            .toJsonString(hiveToDynamoDBTypeMapping));
+      }
+
+      boolean hiveToDynamoDBNullSerialization = Boolean
+          .parseBoolean(tableDesc.getProperties().getProperty(DynamoDBConstants.DYNAMODB_NULL_SERIALIZATION));
+      jobProperties.put(DynamoDBConstants.DYNAMODB_NULL_SERIALIZATION,
+          Boolean.toString(hiveToDynamoDBNullSerialization));
 
       if (tableDesc.getProperties().getProperty(DynamoDBConstants.THROUGHPUT_READ_PERCENT)
           != null) {
@@ -169,13 +182,20 @@ public class DynamoDBStorageHandler implements HiveMetaHook, HiveStoragePredicat
             .getProperty(DynamoDBConstants.THROUGHPUT_WRITE_PERCENT));
       }
 
-      String readThroughput = description.getProvisionedThroughput().getReadCapacityUnits()
-          .toString();
-      String writeThroughput = description.getProvisionedThroughput().getWriteCapacityUnits()
-          .toString();
+      if (description.getBillingModeSummary() == null
+          || description.getBillingModeSummary().getBillingMode()
+          .equals(DynamoDBConstants.BILLING_MODE_PROVISIONED)) {
+        useExplicitThroughputIfRequired(jobProperties, tableDesc);
+      } else {
+        // If not specified at the table level, set default value
+        jobProperties.put(DynamoDBConstants.READ_THROUGHPUT, tableDesc.getProperties()
+            .getProperty(DynamoDBConstants.READ_THROUGHPUT,
+                DynamoDBConstants.DEFAULT_CAPACITY_FOR_ON_DEMAND.toString()));
+        jobProperties.put(DynamoDBConstants.WRITE_THROUGHPUT, tableDesc.getProperties()
+            .getProperty(DynamoDBConstants.WRITE_THROUGHPUT,
+                DynamoDBConstants.DEFAULT_CAPACITY_FOR_ON_DEMAND.toString()));
+      }
 
-      jobProperties.put(DynamoDBConstants.READ_THROUGHPUT, readThroughput);
-      jobProperties.put(DynamoDBConstants.WRITE_THROUGHPUT, writeThroughput);
       jobProperties.put(DynamoDBConstants.ITEM_COUNT, description.getItemCount().toString());
       jobProperties.put(DynamoDBConstants.TABLE_SIZE_BYTES, description.getTableSizeBytes()
           .toString());
@@ -184,11 +204,23 @@ public class DynamoDBStorageHandler implements HiveMetaHook, HiveStoragePredicat
       log.info("Average item size: " + averageItemSize);
       log.info("Item count: " + description.getItemCount());
       log.info("Table size: " + description.getTableSizeBytes());
-      log.info("Read throughput: " + readThroughput);
-      log.info("Write throughput: " + writeThroughput);
+      log.info("Read throughput: " + jobProperties.get(DynamoDBConstants.READ_THROUGHPUT));
+      log.info("Write throughput: " + jobProperties.get(DynamoDBConstants.WRITE_THROUGHPUT));
 
     } finally {
       client.close();
+    }
+  }
+
+  private void useExplicitThroughputIfRequired(Map<String, String> jobProperties, TableDesc tableDesc) {
+    String userRequiredReadThroughput = tableDesc.getProperties().getProperty(DynamoDBConstants.READ_THROUGHPUT);
+    if (userRequiredReadThroughput != null) {
+      jobProperties.put(DynamoDBConstants.READ_THROUGHPUT, userRequiredReadThroughput);
+    }
+
+    String userRequiredWriteThroughput = tableDesc.getProperties().getProperty(DynamoDBConstants.WRITE_THROUGHPUT);
+    if (userRequiredWriteThroughput != null) {
+      jobProperties.put(DynamoDBConstants.WRITE_THROUGHPUT, userRequiredWriteThroughput);
     }
   }
 
@@ -208,7 +240,7 @@ public class DynamoDBStorageHandler implements HiveMetaHook, HiveStoragePredicat
   }
 
   @Override
-  public Class<? extends SerDe> getSerDeClass() {
+  public Class<? extends AbstractSerDe> getSerDeClass() {
     return DynamoDBSerDe.class;
   }
 
@@ -240,40 +272,89 @@ public class DynamoDBStorageHandler implements HiveMetaHook, HiveStoragePredicat
   void checkTableSchemaMapping(TableDescription tableDescription, Table table) throws
       MetaException {
     String mapping = table.getParameters().get(DynamoDBConstants.DYNAMODB_COLUMN_MAPPING);
-    Map<String, String> columnMapping = HiveDynamoDBUtil.getHiveToDynamoDBSchemaMapping(mapping);
+    Map<String, String> columnMapping = HiveDynamoDBUtil.getHiveToDynamoDBMapping(mapping);
 
     List<FieldSchema> tableSchema = table.getSd().getCols();
     for (FieldSchema fieldSchema : tableSchema) {
+      String fieldSchemaName = fieldSchema.getName().toLowerCase();
+
       if (HiveDynamoDBTypeFactory.isHiveDynamoDBItemMapType(fieldSchema.getType())) {
         // We don't need column mapping as this column contains full
         // DynamoDB row
+        columnMapping.remove(fieldSchemaName);
         continue;
       }
 
-      String fieldSchemaName = fieldSchema.getName().toLowerCase();
       if (columnMapping.containsKey(fieldSchemaName)) {
         if (columnMapping.get(fieldSchemaName).isEmpty()) {
           throw new MetaException("Invalid column mapping for column: " + fieldSchemaName);
         }
+        columnMapping.remove(fieldSchemaName);
       } else {
         throw new MetaException("Could not find column mapping for column: " + fieldSchemaName);
       }
     }
+
+    if (!columnMapping.isEmpty()) {
+      StringBuilder exMessage = new StringBuilder("Could not find column(s) for column mapping(s): ");
+      String delim = "";
+      for (String extraMapping : columnMapping.keySet()) {
+        exMessage.append(delim + extraMapping + ":" + columnMapping.get(extraMapping));
+        delim = ",";
+      }
+      throw new MetaException(exMessage.toString());
+    }
   }
 
-  void checkTableSchemaType(TableDescription tableDescription, Table table) throws MetaException {
+  void checkTableSchemaType(TableDescription tableDescription, Table table) throws
+      MetaException {
     List<FieldSchema> tableSchema = table.getSd().getCols();
+    String mapping = table.getParameters().get(DynamoDBConstants.DYNAMODB_TYPE_MAPPING);
+    Map<String, String> typeMapping = HiveDynamoDBUtil.getHiveToDynamoDBMapping(mapping);
+    boolean hasItemMapType = false;
 
     for (FieldSchema fieldSchema : tableSchema) {
-      for (AttributeDefinition definition : tableDescription.getAttributeDefinitions()) {
-        validateKeySchema(definition.getAttributeName(), definition.getAttributeType(),
-            fieldSchema);
+      String fieldName = fieldSchema.getName();
+      String fieldType = fieldSchema.getType();
+      HiveDynamoDBType ddType;
+      if (typeMapping.containsKey(fieldName)) {
+        try {
+          ddType = HiveDynamoDBTypeFactory.getTypeObjectFromDynamoDBType(typeMapping.get(fieldName));
+        } catch (IllegalArgumentException e) {
+          throw new MetaException("The DynamoDB type " + typeMapping.get(fieldName) + " is not supported");
+        }
+        if (!ddType.supportsHiveType(TypeInfoUtils.getTypeInfoFromTypeString(fieldType))) {
+          throw new MetaException("The DynamoDB type " + typeMapping.get(fieldName) + " does not support Hive " +
+                  "type " + fieldType);
+        }
+      } else {
+        try {
+          ddType = HiveDynamoDBTypeFactory.getTypeObjectFromHiveType(fieldType);
+        } catch (IllegalArgumentException e) {
+          throw new MetaException("The hive type " + fieldSchema.getType() + " is not supported in "
+                  + "DynamoDB");
+        }
       }
 
-      // Check for each field type
-      if (HiveDynamoDBTypeFactory.getTypeObjectFromHiveType(fieldSchema.getType()) == null) {
-        throw new MetaException("The hive type " + fieldSchema.getType() + " is not supported in "
-            + "DynamoDB");
+      // make sure only one column has item map type
+      if (HiveDynamoDBTypeFactory.isHiveDynamoDBItemMapType(ddType)) {
+        if (hasItemMapType) {
+          throw new MetaException("Only one column can be mapped to item map type " + fieldType);
+        }
+        hasItemMapType = true;
+      }
+
+      // validate key schema
+      for (AttributeDefinition definition : tableDescription.getAttributeDefinitions()) {
+        String attributeName = definition.getAttributeName();
+        if (fieldName.equalsIgnoreCase(attributeName)) {
+          String attributeType = definition.getAttributeType();
+          if (HiveDynamoDBTypeFactory.isHiveDynamoDBItemMapType(ddType) ||
+                  (!ddType.getDynamoDBType().equals(attributeType))) {
+            throw new MetaException("The key element " + fieldName + " does not match type. " +
+                    "DynamoDB Type: " + attributeType + " Hive type: " + fieldType);
+          }
+        }
       }
     }
   }
@@ -281,19 +362,6 @@ public class DynamoDBStorageHandler implements HiveMetaHook, HiveStoragePredicat
   private DynamoDBClient createDynamoDBClient(Table table) {
     String region = table.getParameters().get(DynamoDBConstants.REGION);
     return new DynamoDBClient(conf, region);
-  }
-
-  private void validateKeySchema(String attributeName, String attributeType, FieldSchema
-      fieldSchema) throws MetaException {
-    if (fieldSchema.getName().equalsIgnoreCase(attributeName)) {
-      HiveDynamoDBType ddType = HiveDynamoDBTypeFactory.getTypeObjectFromHiveType(fieldSchema
-          .getType());
-      if ((ddType == null) || (ddType.equals(HiveDynamoDBTypeFactory.DYNAMODB_ITEM_TYPE))
-          || (!ddType.getDynamoDBType().equals(attributeType))) {
-        throw new MetaException("The key element " + fieldSchema.getName() + " does not match "
-            + "type. DynamoDB Type: " + attributeType + " Hive type: " + fieldSchema.getType());
-      }
-    }
   }
 
   private void checkTableStatus(TableDescription tableDescription) throws MetaException {

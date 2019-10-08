@@ -14,26 +14,33 @@
 package org.apache.hadoop.hive.dynamodb.type;
 
 import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-
 import org.apache.hadoop.dynamodb.type.DynamoDBNumberType;
 import org.apache.hadoop.hive.dynamodb.util.DynamoDBDataParser;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 public class HiveDynamoDBNumberType extends DynamoDBNumberType implements HiveDynamoDBType {
-  private final DynamoDBDataParser parser = new DynamoDBDataParser();
 
   @Override
-  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector) {
-    String value = parser.getNumber(data, objectInspector);
-    return new AttributeValue().withN(value);
+  public AttributeValue getDynamoDBData(Object data, ObjectInspector objectInspector, boolean nullSerialization) {
+    String value = DynamoDBDataParser.getNumber(data, objectInspector);
+    return value == null ? DynamoDBDataParser.getNullAttribute(nullSerialization) : new AttributeValue().withN(value);
   }
 
   @Override
-  public Object getHiveData(AttributeValue data, String hiveType) {
-    if (data == null) {
-      return null;
-    }
-    return parser.getNumberObject(data.getN(), hiveType);
+  public TypeInfo getSupportedHiveType() {
+    throw new UnsupportedOperationException(getClass().toString() + " does not support this operation.");
+  }
+
+  @Override
+  public boolean supportsHiveType(TypeInfo typeInfo) {
+    return typeInfo.equals(TypeInfoFactory.doubleTypeInfo) || typeInfo.equals(TypeInfoFactory.longTypeInfo);
+  }
+
+  @Override
+  public Object getHiveData(AttributeValue data, ObjectInspector objectInspector) {
+    return data.getN() == null ? null : DynamoDBDataParser.getNumberObject(data.getN(), objectInspector);
   }
 
 }

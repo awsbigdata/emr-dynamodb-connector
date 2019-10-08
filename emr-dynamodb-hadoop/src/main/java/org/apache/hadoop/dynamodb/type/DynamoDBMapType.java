@@ -1,6 +1,4 @@
 /**
- * Copyright 2012-2016 Amazon.com, Inc. or its affiliates. All Rights Reserved.
- *
  * Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file
  * except in compliance with the License. A copy of the License is located at
  *
@@ -15,24 +13,27 @@ package org.apache.hadoop.dynamodb.type;
 
 import com.amazonaws.services.dynamodbv2.model.AttributeValue;
 
-import org.apache.hadoop.dynamodb.key.DynamoDBBooleanKey;
 import org.apache.hadoop.dynamodb.key.DynamoDBKey;
+import org.apache.hadoop.dynamodb.type.DynamoDBType;
 
+public class DynamoDBMapType implements DynamoDBType {
 
-public class DynamoDBBooleanType implements DynamoDBType {
+  @Override
+  public AttributeValue getAttributeValue(String... values) {
+    System.out.println("values:");
+    System.out.println(values);
+    System.out.println("end values");
+    return new AttributeValue();//.withM(values[0]);
+  }
 
-    @Override
-    public AttributeValue getAttributeValue(String... values) {
-        return new AttributeValue().withBOOL(new Boolean(values[0]));
-    }
+  @Override
+  public String getDynamoDBType() {
+    return DynamoDBTypeConstants.MAP;
+  }
 
-    @Override
-    public String getDynamoDBType() {
-        return "BOOL";
-    }
+  @Override
+  public DynamoDBKey getKey(String key) {
+    throw new RuntimeException("Unexpected type " + getDynamoDBType());
+  }
 
-    @Override
-    public DynamoDBKey getKey(String key) {
-        return new DynamoDBBooleanKey(key);
-    }
 }
